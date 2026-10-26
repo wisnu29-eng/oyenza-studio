@@ -1,6 +1,6 @@
 //! How the floating island moves: its springs (it can stretch and settle
 //! like a drop, since nothing holds it to the edge), how it arrives when
-//! the theme is picked, and where content scales from.
+//! the theme is picked, and where leaving content gathers.
 //!
 //! [`crate::island::Island`] takes these tunings while it floats and the
 //! Classic ones while it hangs from the edge; the app picks the content
@@ -39,11 +39,6 @@ pub const RADIUS_SHRINK: (f32, f32) = (150.0, 24.5); // critical
 /// damped, so it never pokes above the edge or bobs (tau about 58 ms).
 pub const TOP: (f32, f32) = (300.0, 34.6); // critical
 
-/// Incoming content drops this many DIPs as it fades in. Classic drops 6,
-/// out of the bezel; a floating island has no bezel to come out of, so its
-/// content blooms about the body's middle ([`pivot`]) and only settles.
-pub const CONTENT_DROP: f32 = 2.0;
-
 /// The resting pill under the pointer swells this much on every side (Classic
 /// grows 12 wide and 4 down, from the edge it hangs on): an even outset keeps
 /// a capsule a capsule.
@@ -58,9 +53,9 @@ pub fn hover_lift(g: Geom) -> Geom {
     Geom::new(g.w + 2.0 * d, g.h + 2.0 * d, g.r + d).below(g.dy - d + HOVER_SINK)
 }
 
-/// Where content scales from during a morph to `target`: the middle of the
-/// morph's small end, so content grows out of the pill and shrinks back into
-/// it (Classic's is the top centre, where the island hangs). Opening, that's
+/// Where content is anchored during a morph to `target`: the middle of the
+/// morph's small end, so the leaving picture shrinks back into the pill
+/// (Classic's is the top centre, where the island hangs). Opening, that's
 /// the body's middle as it grows; closing, the middle of the pill it's
 /// becoming, near the top, so the leaving card gathers into the pill instead
 /// of into the middle of a card that's no longer there.
@@ -103,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn content_scales_about_the_small_end() {
+    fn content_gathers_about_the_small_end() {
         let pill = Geom::new(120.0, 32.0, 16.0);
         let card = Geom::new(620.0, 216.0, 40.0);
         // Opening: the middle of the body as it grows.

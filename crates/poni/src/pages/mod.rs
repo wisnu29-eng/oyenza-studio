@@ -11,6 +11,7 @@
 
 pub mod addons;
 pub mod clipboard;
+pub mod desktops;
 pub mod focus;
 pub mod health;
 pub mod media;
@@ -56,6 +57,8 @@ pub enum PageKind {
     Clipboard,
     Today,
     System,
+    /// Windows' virtual desktops, with previews and drag-to-move.
+    Desktops,
     /// The teleprompter: a script read under the webcam.
     Script,
     /// Only while signing in to Oyenza or signed in ([`tabs`]).
@@ -70,7 +73,7 @@ pub enum PageKind {
 }
 
 impl PageKind {
-    pub const ALL: [PageKind; 13] = [
+    pub const ALL: [PageKind; 14] = [
         PageKind::Media,
         PageKind::Focus,
         PageKind::Health,
@@ -79,6 +82,7 @@ impl PageKind {
         PageKind::Clipboard,
         PageKind::Today,
         PageKind::System,
+        PageKind::Desktops,
         PageKind::Script,
         PageKind::Oyenza,
         PageKind::Prayer,
@@ -96,6 +100,7 @@ impl PageKind {
             PageKind::Clipboard => "clipboard",
             PageKind::Today => "today",
             PageKind::System => "system",
+            PageKind::Desktops => "desktops",
             PageKind::Script => "script",
             PageKind::Oyenza => "oyenza",
             PageKind::Prayer => "prayer",
@@ -120,6 +125,7 @@ impl PageKind {
             PageKind::Clipboard => "Clipboard",
             PageKind::Today => "Today",
             PageKind::System => "System",
+            PageKind::Desktops => "Desktops",
             PageKind::Script => "Script",
             PageKind::Oyenza => "Oyenza",
             PageKind::Prayer => "Prayer",
@@ -138,6 +144,7 @@ impl PageKind {
             PageKind::Clipboard => Icon::Clipboard,
             PageKind::Today => Icon::Calendar,
             PageKind::System => Icon::Gauge,
+            PageKind::Desktops => Icon::Desktops,
             PageKind::Script => Icon::Script,
             PageKind::Oyenza => Icon::Wallet,
             PageKind::Prayer => Icon::Moon,
@@ -173,6 +180,7 @@ pub fn tabs(st: &AppState) -> Vec<PageKind> {
             PageKind::Oyenza => st.oyenza.tab_visible(),
             PageKind::Prayer => st.prayer_on(),
             PageKind::Script => st.script_on(),
+            PageKind::Desktops => st.desktops.available,
             p => p.tabbed(),
         })
         .collect()
@@ -196,6 +204,7 @@ pub fn content_height(p: PageKind, st: &AppState) -> f32 {
         PageKind::Clipboard => clipboard::height(st),
         PageKind::Today => today::height(st),
         PageKind::System => system::height(st),
+        PageKind::Desktops => desktops::height(st),
         PageKind::Script => script::height(st),
         PageKind::Oyenza => oyenza::height(st),
         PageKind::Prayer => prayer::height(st),
@@ -215,6 +224,7 @@ pub fn next_wake(page: PageKind, st: &AppState) -> Option<f64> {
         PageKind::Shelf => shelf::next_wake(st),
         PageKind::Oyenza => oyenza::next_wake(st),
         PageKind::Settings => settings::next_wake(st),
+        PageKind::Desktops => desktops::next_wake(st),
         PageKind::Script => script::next_wake(st),
         PageKind::Prayer => prayer::next_wake(st),
         _ => None,
@@ -326,6 +336,7 @@ pub(crate) fn draw_page(ui: &mut Ui, st: &mut AppState, area: Rect, page: PageKi
         PageKind::Clipboard => clipboard::draw(ui, st, area),
         PageKind::Today => today::draw(ui, st, area),
         PageKind::System => system::draw(ui, st, area),
+        PageKind::Desktops => desktops::draw(ui, st, area),
         PageKind::Script => script::draw(ui, st, area),
         PageKind::Oyenza => oyenza::draw(ui, st, area),
         PageKind::Prayer => prayer::draw(ui, st, area),

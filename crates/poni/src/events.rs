@@ -114,6 +114,20 @@ pub enum OyenzaEvent {
     Disconnected { by_server: bool },
 }
 
+/// What the virtual-desktop worker reports (`services::desktops`).
+pub enum DesktopEvent {
+    /// The desktops in order, their windows, and which one is in front.
+    Snapshot { desktops: Vec<crate::state::VirtualDesktop>, current: usize },
+    /// A snapshot of one window; None when it can't be captured (its icon shows).
+    Thumb { hwnd: isize, image: Option<Image> },
+    /// The desktop in front changed (a switch of ours, or someone used the keyboard).
+    Current(usize),
+    /// A window moved to another desktop (`ok` false and `why` when it couldn't).
+    Moved { hwnd: isize, desktop: String, ok: bool, why: String },
+    /// The worker couldn't read or switch desktops ("why" is for the page).
+    Failed(String),
+}
+
 pub enum AppEvent {
     /// The current media session changed (None = nothing playing / no session).
     Media(Option<MediaSession>),
@@ -158,6 +172,8 @@ pub enum AppEvent {
     /// Paired phones: pairing done, the list changed, files from a phone.
     Paired(poni_core::pairdrop::MeetEvent),
     Oyenza(OyenzaEvent),
+    /// Virtual desktops (`services::desktops`), for the Desktops page.
+    Desktops(DesktopEvent),
     /// Where an add-on's files stand (`services::addons`).
     Addon { id: &'static str, status: poni_core::addons::Status },
     /// What the update file said (`services::update`).

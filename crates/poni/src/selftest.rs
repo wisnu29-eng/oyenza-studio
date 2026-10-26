@@ -39,8 +39,9 @@ use crate::pages::{self, PageKind};
 use crate::paths;
 use crate::png;
 use crate::state::{
-    AppState, FpsAccess, GameState, Hud, HudKind, InlineAction, Locate, LyricsState, LyricsStatus, MediaSession, Notice, NoticeAction, OyenzaLink,
-    OyenzaState, PhoneAsk, PairedPhone, PhoneDrop, PhoneTransfer, PhoneView, PowerState, PrayerState, SysStats, VolumeState,
+    AppState, DesktopWindow, FpsAccess, GameState, Hud, HudKind, InlineAction, Locate, LyricsState, LyricsStatus, MediaSession, Notice,
+    NoticeAction, OyenzaLink, OyenzaState, PhoneAsk, PairedPhone, PhoneDrop, PhoneTransfer, PhoneView, PowerState, PrayerState, SysStats,
+    VirtualDesktop, VolumeState,
 };
 use crate::ui::wid;
 use poni_core::addons::{Status as AddonStatus, JAPANESE_READINGS, PRAYER_TIMES, SCRIPT_READER};
@@ -287,6 +288,87 @@ fn sample_icon(rgb: u32) -> Image {
         }
     }
     ImageData::new(PX, PX, px)
+}
+
+/// A plain 320x180 "window" for a desktop card's preview: a darker title strip
+/// over a soft gradient in `rgb`.
+fn sample_shot(rgb: u32) -> Image {
+    const W: u32 = 320;
+    const H: u32 = 180;
+    let (r, g, b) = ((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
+    let mut px = vec![0u8; (W * H * 4) as usize];
+    for y in 0..H {
+        let strip = y < 22;
+        let k = if strip { 0.45 } else { 0.95 - 0.25 * (y as f32 / H as f32) };
+        for x in 0..W {
+            let o = ((y * W + x) * 4) as usize;
+            px[o] = (f32::from(b) * k) as u8;
+            px[o + 1] = (f32::from(g) * k) as u8;
+            px[o + 2] = (f32::from(r) * k) as u8;
+            px[o + 3] = 255;
+        }
+    }
+    ImageData::new(W, H, px)
+}
+
+/// Sample desktops for the self-test's Desktops page: three apps on Work, one
+/// on Music, an empty Personal, and two on Reading.
+fn sample_desktops(st: &mut AppState) {
+    let win = |hwnd: isize, title: &str, app: &str, app_name: &str| DesktopWindow {
+        hwnd,
+        title: title.into(),
+        app_name: app_name.into(),
+        app: app.into(),
+        minimized: false,
+    };
+    let desk = |id: &str, name: &str, windows: Vec<DesktopWindow>| VirtualDesktop {
+        id: id.into(),
+        name: name.into(),
+        wallpaper: None,
+        windows,
+    };
+    st.desktops.available = true;
+    st.desktops.loading = false;
+    st.desktops.error = None;
+    st.desktops.flash = None;
+    st.desktops.moving = None;
+    st.desktops.list = vec![
+        desk(
+            "work",
+            "Work",
+            vec![
+                win(101, "Quarterly plan - Sheets", "C:\\Apps\\Sheets.exe", "Sheets"),
+                win(102, "Draft - Notes", "C:\\Apps\\Notes.exe", "Notes"),
+                win(103, "Files", "C:\\Apps\\Files.exe", "Files"),
+            ],
+        ),
+        desk("music", "Music", vec![win(201, "Paper Boats - Music", "C:\\Apps\\Music.exe", "Music")]),
+        desk("personal", "Personal", Vec::new()),
+        desk(
+            "reading",
+            "Reading",
+            vec![
+                win(401, "Inbox - Mail", "C:\\Apps\\Mail.exe", "Mail"),
+                win(402, "October - Calendar", "C:\\Apps\\Calendar.exe", "Calendar"),
+            ],
+        ),
+    ];
+    st.desktops.current = 0;
+    st.desktops.pick = Some(0);
+    st.desktops.thumbs.clear();
+    for (hwnd, rgb) in [(101, 0x2B579A), (102, 0x3C8D6E), (201, 0x8A5CF6), (401, 0xC2410C), (402, 0x0F766E)] {
+        st.desktops.thumbs.insert(hwnd, Some(sample_shot(rgb)));
+    }
+    for (path, rgb) in [
+        ("C:\\Apps\\Sheets.exe", 0x2B579A),
+        ("C:\\Apps\\Notes.exe", 0x3C8D6E),
+        ("C:\\Apps\\Files.exe", 0x6B7280),
+        ("C:\\Apps\\Music.exe", 0x8A5CF6),
+        ("C:\\Apps\\Mail.exe", 0xC2410C),
+        ("C:\\Apps\\Calendar.exe", 0x0F766E),
+    ] {
+        st.app_icons.insert(path.into(), Some(sample_icon(rgb)));
+    }
 }
 
 fn sample_app(i: usize, name: &str, cpu: f32, memory: u64, io: f64) -> AppUse {
@@ -773,6 +855,8 @@ enum Scene {
     BluetoothHud,
     HealthNotice,
     Page(PageKind),
+    /// The Desktops page with sample virtual desktops and windows.
+    Desktops,
     /// The shelf while files are dragged over the island.
     ShelfDrop,
     /// An empty shelf: the drop zone and the Phone drop tile.
@@ -930,7 +1014,7 @@ const SAMPLE_SCRIPT: &str = "Hi everyone, this one takes two minutes. Today I'll
 Drop any file on the island and it waits on the Shelf. Press the phone button, scan the code, and the file is on your phone. \
 No cable, no account, nothing to install on the phone.\n\nThat's it. Thanks for watching.";
 
-const SCENES: [Scene; 82] = [
+const SCENES: [Scene; 83] = [
     Scene::IdleClock,
     Scene::IdleEyes,
     Scene::Media,
@@ -1027,6 +1111,8 @@ const SCENES: [Scene; 82] = [
     Scene::SettingsUpdate,
     Scene::UpdateSheet,
     Scene::UpdateReady,
+    // Windows' virtual desktops, with sample desktops and windows.
+    Scene::Desktops,
 ];
 
 impl Scene {
@@ -1042,6 +1128,7 @@ impl Scene {
             Scene::BluetoothHud => "bluetooth-hud".into(),
             Scene::HealthNotice => "health-notice".into(),
             Scene::Page(p) => format!("page-{}", p.key()),
+            Scene::Desktops => "page-desktops".into(),
             Scene::ShelfDrop => "page-shelf-drop".into(),
             Scene::ShelfEmpty => "page-shelf-empty".into(),
             Scene::ShelfPhone => "page-shelf-phone".into(),
@@ -1110,6 +1197,7 @@ impl Scene {
     fn page(self) -> Option<PageKind> {
         match self {
             Scene::Page(p) => Some(p),
+            Scene::Desktops => Some(PageKind::Desktops),
             Scene::ShelfDrop | Scene::ShelfEmpty | Scene::ShelfPhone | Scene::ShelfPhoneAsk | Scene::ShelfPhoneReceive => Some(PageKind::Shelf),
             Scene::TabClick => Some(PageKind::ALL[0]),
             Scene::HealthSignedOut => Some(PageKind::Health),
@@ -2031,6 +2119,9 @@ impl SelfTest {
             st.store.script.text.clear();
         }
         st.recorder = scene == Scene::ScriptRecorder;
+        if scene == Scene::Desktops {
+            sample_desktops(st);
+        }
         st.system = fake_system(scene);
         st.settings.game_stats = scene.game();
         st.game = fake_game(scene, &mut st.system);

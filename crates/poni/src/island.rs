@@ -22,6 +22,13 @@ const GROW_H: (f32, f32) = (300.0, 26.0); // zeta 0.75
 const SHRINK_W: (f32, f32) = (330.0, 33.0); // zeta 0.91
 const SHRINK_H: (f32, f32) = (420.0, 38.0); // zeta 0.93
 const RADIUS: (f32, f32) = (420.0, 41.0); // critical
+/// A hurried grow (the pointer rested on the pill): stiff, critically damped
+/// springs that put the menu there in about a fifth of a second and settle
+/// in under a third, so the eye can't call it a wait.
+const HURRY_W: (f32, f32) = (3600.0, 120.0); // critical
+const HURRY_H: (f32, f32) = (3000.0, 110.0); // critical
+const HURRY_R: (f32, f32) = (3600.0, 120.0); // critical
+const HURRY_TOP: (f32, f32) = (1200.0, 69.3); // critical
 /// Content opacity: critically damped, tau about 38 ms.
 const CONTENT: (f32, f32) = (700.0, 52.9);
 /// Delay before new content starts fading in (seconds).
@@ -70,6 +77,8 @@ pub struct Island {
     /// Whether a frame has moved the island yet. Until then a new gap is
     /// taken at once: the island starts where it rests, without a slide.
     stepped: bool,
+    /// The next grow uses the hurried tunings (a hover open).
+    quick: bool,
 }
 
 impl Island {
@@ -86,6 +95,7 @@ impl Island {
             floor_w: None,
             floor_h: None,
             stepped: false,
+            quick: false,
         }
     }
 
@@ -129,12 +139,35 @@ impl Island {
     /// the direction of the morph.
     pub fn set_target(&mut self, g: Geom, now: f64, new_content: bool) {
         self.target = g;
+        let quick = std::mem::take(&mut self.quick);
         let growing = self.tune();
+        // A hover open spends no time on the long grow: the pointer is already
+        // on the pill, so the menu comes as soon as it can.
+        let quick_open = quick && growing;
+        if quick_open {
+            self.w.retune(HURRY_W.0, HURRY_W.1);
+            self.h.retune(HURRY_H.0, HURRY_H.1);
+            self.r.retune(HURRY_R.0, HURRY_R.1);
+            self.top.retune(HURRY_TOP.0, HURRY_TOP.1);
+        }
         self.aim();
         if new_content {
-            self.content.snap(0.0);
-            self.fade_in_at = Some(now + if growing { FADE_DELAY_GROW } else { FADE_DELAY_SHRINK });
+            if quick_open {
+                // The page is already there; the growing outline reveals it,
+                // so a hover open has neither a wait nor a fade-in.
+                self.content.snap(1.0);
+                self.fade_in_at = None;
+            } else {
+                self.content.snap(0.0);
+                self.fade_in_at = Some(now + if growing { FADE_DELAY_GROW } else { FADE_DELAY_SHRINK });
+            }
         }
+    }
+
+    /// Use the hurried springs for the next grow (a hover open). A morph in
+    /// any other direction keeps its usual tunings.
+    pub fn hurry(&mut self) {
+        self.quick = true;
     }
 
     /// Tune the springs for the morph to the target from where the outline
@@ -206,6 +239,7 @@ impl Island {
         self.top.snap(self.top_target());
         self.floor_w = None;
         self.floor_h = None;
+        self.quick = false;
         self.content.snap(1.0);
         self.fade_in_at = None;
     }
@@ -414,6 +448,26 @@ mod tests {
             assert_eq!(i.current(), PILL);
             assert_eq!(i.body_rect_at(300.0), Rect::new(240.0, 8.0, 120.0, 32.0));
         }
+    }
+
+    #[test]
+    fn a_hurried_grow_settles_sooner() {
+        let mut normal = floating(PILL);
+        normal.set_target(CARD, 0.0, true);
+        let t_normal = run(&mut normal, 60.0, 2.0, |_| {});
+
+        let mut quick = floating(PILL);
+        quick.hurry();
+        quick.set_target(CARD, 0.0, true);
+        assert_eq!((tuning(&quick.w), tuning(&quick.h), tuning(&quick.r)), (HURRY_W, HURRY_H, HURRY_R));
+        let t_quick = run(&mut quick, 60.0, 2.0, |_| {});
+        assert!(quick.settled() && t_quick < t_normal, "quick {t_quick:.2} s vs normal {t_normal:.2} s");
+        // The tail (the last hundredth of a DIP) ends sooner than the normal
+        // grow; the panel is visibly there well before either.
+        assert!(t_quick < 0.35, "a hurried open took {t_quick:.2} s");
+        assert_eq!(quick.current(), CARD);
+        // Only the next morph is hurried.
+        assert!(!quick.quick);
     }
 
     #[test]

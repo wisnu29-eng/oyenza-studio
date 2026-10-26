@@ -263,6 +263,69 @@ impl PhoneDrop {
     }
 }
 
+/// A top-level window on a virtual desktop (`services::desktops`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DesktopWindow {
+    /// The window handle as an integer (the UI only passes it back).
+    pub hwnd: isize,
+    pub title: String,
+    /// Full path of the app that owns it (its icon comes from `AppState::app_icons`).
+    pub app: String,
+    /// The app's file name without `.exe` ("chrome"), for labels.
+    pub app_name: String,
+    pub minimized: bool,
+}
+
+/// One Windows virtual desktop, in the order Win+Ctrl+Left/Right visits them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct VirtualDesktop {
+    /// The desktop's GUID as `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`.
+    pub id: String,
+    /// The name Windows gives it ("Desktop 1", or what the person typed).
+    pub name: String,
+    /// The wallpaper Windows has for it, if it has its own (else the current one).
+    pub wallpaper: Option<String>,
+    /// Its top-level windows, in the order Windows lists them.
+    pub windows: Vec<DesktopWindow>,
+}
+
+/// An app being dragged from one desktop to another in the Desktops page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DesktopDrag {
+    pub hwnd: isize,
+    pub app: String,
+    pub title: String,
+    /// The desktop it is on now (its id).
+    pub from: String,
+}
+
+/// Windows' virtual desktops, as the Desktops page sees them
+/// (`services::desktops`). Only read while that page is open: the app starts
+/// a worker the first time the page shows and stops it when it closes.
+#[derive(Clone, Debug, Default)]
+pub struct DesktopsState {
+    /// This build can switch desktops (Windows, not the Mac).
+    pub available: bool,
+    pub list: Vec<VirtualDesktop>,
+    /// Index into `list` of the desktop in front.
+    pub current: usize,
+    /// The desktop whose apps the page lists (follows `current` unless the
+    /// pointer rests on another card).
+    pub pick: Option<usize>,
+    /// A snapshot per window (None = tried, nothing to show: the app's icon).
+    pub thumbs: HashMap<isize, Option<Image>>,
+    /// The first snapshot is on its way.
+    pub loading: bool,
+    /// Why there are no desktops to show ("Windows didn't answer", …).
+    pub error: Option<String>,
+    /// A window is being moved between desktops.
+    pub moving: Option<isize>,
+    /// A short line ("Moved to Desktop 2") until mono time `.1`.
+    pub flash: Option<(String, f64)>,
+    /// The flash reports a failure (it shows in red, not green).
+    pub flash_bad: bool,
+}
+
 /// Transient per-page UI state (scroll offsets, text being typed, …).
 #[derive(Clone, Debug, Default)]
 pub struct PageUiState {
@@ -298,6 +361,13 @@ pub struct PageUiState {
     /// the side of the camera they peek out from (`mac/notch.rs`).
     #[cfg(target_os = "macos")]
     pub peek: poni_core::peek::Peek,
+    /// Desktops page: horizontal scroll of the desktop cards (DIPs).
+    pub desktop_scroll: f32,
+    /// Desktops page: scroll of the picked desktop's app list (DIPs).
+    pub desktop_app_scroll: f32,
+    /// Desktops page: the app under the pressed pointer, once it moved far
+    /// enough to count as a drag.
+    pub desktop_drag: Option<DesktopDrag>,
 }
 
 /// Whether Windows lets Oyenza Studio read a game's frames. Its event tracing
@@ -494,6 +564,8 @@ pub struct AppState {
     pub update: UpdateView,
     /// The Prayer times add-on, while it is on (its choices: `settings.prayer`).
     pub prayer: PrayerState,
+    /// Windows' virtual desktops, while the Desktops page is open.
+    pub desktops: DesktopsState,
     /// The Script page's reading (its script and pace are in `store.script`).
     pub script: poni_core::script::Reader,
     /// A message under the script until a time (mono seconds).
@@ -567,6 +639,7 @@ impl AppState {
             addons: BTreeMap::new(),
             update: UpdateView::default(),
             prayer: PrayerState::default(),
+            desktops: DesktopsState { available: cfg!(windows), ..DesktopsState::default() },
             script: poni_core::script::Reader::default(),
             script_note: None,
             script_hidden: None,

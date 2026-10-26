@@ -47,7 +47,7 @@ pub enum MonitorChoice {
 }
 
 /// Bumped when defaults change in a way existing files should pick up.
-pub const SETTINGS_VERSION: u32 = 3;
+pub const SETTINGS_VERSION: u32 = 4;
 
 fn version_zero() -> u32 {
     0
@@ -163,7 +163,7 @@ impl Default for Settings {
             theme: Theme::Classic,
             idle_style: IdleStyle::Clock,
             use_24h: true,
-            hover_delay_ms: 220,
+            hover_delay_ms: 40,
             collapse_delay_ms: 0,
             expanded_width: 620.0,
             hide_in_fullscreen: true,
@@ -236,6 +236,11 @@ impl Settings {
         // 380 ms grace read as lag; coming back while it closes reopens it).
         if self.settings_version < 3 && self.collapse_delay_ms == 380 {
             self.collapse_delay_ms = 0;
+        }
+        // v4: hover opens almost at once. The 220 ms dwell read as lag next to
+        // the grow, and most of that pause was the wait before it started.
+        if self.settings_version < 4 && self.hover_delay_ms == 220 {
+            self.hover_delay_ms = 40;
         }
         self.settings_version = self.settings_version.max(SETTINGS_VERSION);
         // Step aside is no longer offered: the island stays over maximized windows.
@@ -335,15 +340,22 @@ mod tests {
 
     #[test]
     fn migrates_old_hover_default_once() {
+        // The 140 ms default became 220 ms, then 40 ms: an untouched old file
+        // picks up the latest while a chosen value stays.
         let s: Settings = serde_json::from_str(r#"{"hover_delay_ms":140}"#).unwrap();
         assert_eq!(s.settings_version, 0);
         let s = s.sanitized();
-        assert_eq!((s.hover_delay_ms, s.settings_version), (220, SETTINGS_VERSION));
+        assert_eq!((s.hover_delay_ms, s.settings_version), (40, SETTINGS_VERSION));
+        let s: Settings = serde_json::from_str(r#"{"settings_version":3,"hover_delay_ms":220}"#).unwrap();
+        assert_eq!(s.sanitized().hover_delay_ms, 40);
         // A user's own choice is kept, and a current file isn't touched.
         let s: Settings = serde_json::from_str(r#"{"hover_delay_ms":90}"#).unwrap();
         assert_eq!(s.sanitized().hover_delay_ms, 90);
         let s: Settings = serde_json::from_str(r#"{"settings_version":2,"hover_delay_ms":140}"#).unwrap();
         assert_eq!(s.sanitized().hover_delay_ms, 140);
+        let s: Settings = serde_json::from_str(r#"{"settings_version":3,"hover_delay_ms":300}"#).unwrap();
+        assert_eq!(s.sanitized().hover_delay_ms, 300);
+        assert_eq!(Settings::default().hover_delay_ms, 40);
     }
 
     #[test]
@@ -352,7 +364,7 @@ mod tests {
         let s = serde_json::from_str::<Settings>(r#"{"settings_version":2,"collapse_delay_ms":380}"#).unwrap().sanitized();
         assert_eq!((s.collapse_delay_ms, s.settings_version), (0, SETTINGS_VERSION));
         let s = serde_json::from_str::<Settings>(r#"{"collapse_delay_ms":380,"hover_delay_ms":140}"#).unwrap().sanitized();
-        assert_eq!((s.collapse_delay_ms, s.hover_delay_ms), (0, 220));
+        assert_eq!((s.collapse_delay_ms, s.hover_delay_ms), (0, 40));
         // A grace the user chose is kept, a current file isn't touched, and 0 stays 0.
         let s: Settings = serde_json::from_str(r#"{"settings_version":2,"collapse_delay_ms":600}"#).unwrap();
         assert_eq!(s.sanitized().collapse_delay_ms, 600);

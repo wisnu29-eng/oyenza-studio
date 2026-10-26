@@ -65,6 +65,25 @@ pub enum OyenzaCmd {
     RefreshHealth,
 }
 
+/// Requests for the virtual-desktop worker (`services::desktops`), made by
+/// the Desktops page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DesktopCmd {
+    /// Read the desktops, their windows and a snapshot of each.
+    Refresh,
+    /// Bring the desktop at this index in the worker's last list to the front.
+    Switch(usize),
+    /// Switch to the desktop `desktop`, then bring `hwnd` forward.
+    Activate { hwnd: isize, desktop: String },
+    /// Move a window to the desktop `desktop` (its GUID string).
+    MoveWindow { hwnd: isize, desktop: String },
+    /// Create a desktop (Win+Ctrl+D), then refresh.
+    New,
+    /// Nobody is at the PC (locked or display off) or battery saver is on:
+    /// stop the registry poll until they are back. Commands still work.
+    Rest(bool),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Media(MediaCmd),
@@ -120,4 +139,5 @@ pub enum Command {
     Phone(PhoneCmd),
     Pair(PairCmd),
     Oyenza(OyenzaCmd),
+    Desktop(DesktopCmd),
 }

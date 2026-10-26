@@ -3,8 +3,8 @@
 
 use crate::activities::{self, Mode};
 use crate::clock;
-use crate::commands::{Command, MediaCmd, OyenzaCmd, PairCmd, PhoneCmd};
-use crate::events::{AppEvent, AppleMusicStatus, EventSink, OyenzaEvent, SendHwnd, WM_APP_APPBAR, WM_APP_EVENT, WM_APP_FRAME, WM_APP_TRAY};
+use crate::commands::{Command, DesktopCmd, MediaCmd, OyenzaCmd, PairCmd, PhoneCmd};
+use crate::events::{AppEvent, AppleMusicStatus, DesktopEvent, EventSink, OyenzaEvent, SendHwnd, WM_APP_APPBAR, WM_APP_EVENT, WM_APP_FRAME, WM_APP_TRAY};
 use crate::gfx::{px_rect, px_union, scale_about, union_rect, Canvas, Gfx, HitMask};
 use crate::icons::Icon;
 use crate::island::{Geom, Island, SHOULDER};
@@ -36,7 +36,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use windows::core::{w, Result};
-use windows::Foundation::Numerics::Matrix3x2;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows::Win32::System::Threading::CreateMutexW;
@@ -361,6 +360,10 @@ pub struct App {
     sysmon: Option<services::sysmon::SysMon>,
     /// The System page is open (its readings come each second).
     sysmon_on: bool,
+    /// The Desktops page's worker, while that page is open (`services::desktops`).
+    desktops: Option<services::desktops::Desktops>,
+    /// The Desktops page is open.
+    desktops_on: bool,
     /// What the System reader was last told about nobody being there and battery saver.
     sysmon_rest: poni_core::sysmon::Rest,
     /// The Oyenza page is on screen: its day list stays live (`services::oyenza`).
@@ -478,10 +481,9 @@ const HOVER_LIFT: (f32, f32, f32) = (12.0, 4.0, 2.0);
 const TOP_BAND: f32 = 8.0;
 /// How long the inline notice pill shows its check mark (seconds).
 const INLINE_DONE_S: f64 = 0.6;
-/// Incoming content starts at this scale and this many DIPs up, and
-/// settles down from the bezel as it fades in.
-const CONTENT_SCALE_FROM: f32 = 0.94;
-const CONTENT_DROP: f32 = 6.0;
+/// Incoming content only fades in: it is laid out at its final size, so an
+/// open reads as the island making room, never as a zoom of the page.
+const CONTENT_SCALE_FROM: f32 = 1.0;
 /// Smallest scale the outgoing content shrinks to as the outline narrows.
 const GHOST_MIN_SCALE: f32 = 0.6;
 
@@ -564,6 +566,8 @@ impl App {
             stats_on: false,
             sysmon: None,
             sysmon_on: false,
+            desktops: None,
+            desktops_on: false,
             sysmon_rest: poni_core::sysmon::Rest::default(),
             oyenza_watch: false,
             frames: None,
@@ -655,6 +659,7 @@ impl App {
         self.set_peek_hotkey(false);
         self.set_script_hotkey(false);
         self.glass.stop(self.hwnd, &mut self.gfx);
+        self.desktops = None;
         if let Some(p) = self.phone.take() {
             p.stop();
         }
@@ -1208,7 +1213,7 @@ impl App {
                     // of the notice still opens its page). The dwell stays
                     // armed: the next movement restarts it.
                 } else {
-                    self.expand();
+                    self.expand_hover();
                 }
             }
             TIMER_RAISE => {
@@ -1984,6 +1989,7 @@ impl App {
             }
             AppEvent::Located(found) => self.on_located(found),
             AppEvent::AdzanEnded => self.adzan_ended(),
+            AppEvent::Desktops(ev) => self.on_desktops(ev),
             AppEvent::Log(s) => pinfo!("{s}"),
         }
         if let Some(before) = media_before {
@@ -2036,6 +2042,15 @@ impl App {
         self.request_frame();
     }
 
+    /// Open because the pointer rested on the pill: no long morph, so the
+    /// menu is there as soon as the pointer is (`Island::hurry`).
+    fn expand_hover(&mut self) {
+        if !self.expanded {
+            self.island.hurry();
+        }
+        self.expand();
+    }
+
     /// (Re)start the hover dwell from `p`.
     fn arm_hover(&mut self, p: Point) {
         self.hover_arm = Some(p);
@@ -2059,6 +2074,7 @@ impl App {
             }
             self.set_stats(false);
             self.set_sysmon(false);
+            self.set_desktops(false);
             self.st.ui.clip_flash = None;
             // Sums shown in the Oyenza tab hide again, and it opens on Today next time.
             self.st.oyenza.reveal = false;
@@ -2157,6 +2173,118 @@ impl App {
         }
     }
 
+    /// The Desktops page opened or closed. Its worker exists only while the
+    /// page is on: opening it reads the desktops and captures their windows,
+    /// closing it drops the worker (nothing polls at rest).
+    fn set_desktops(&mut self, on: bool) {
+        if on == self.desktops_on {
+            return;
+        }
+        self.desktops_on = on;
+        // The self-test's sample pages don't read real desktops.
+        if self.selftest.is_some() {
+            return;
+        }
+        if on {
+            if self.desktops.is_none() {
+                self.desktops = Some(services::desktops::Desktops::start(self.sink.clone()));
+            }
+            self.st.desktops.loading = true;
+            self.st.desktops.error = None;
+            if let Some(d) = &self.desktops {
+                // No registry poll while nobody is there, or on battery saver.
+                d.send(DesktopCmd::Rest(self.locked || self.display_off || self.st.power.saver));
+                d.send(DesktopCmd::Refresh);
+            }
+        } else {
+            self.desktops = None;
+            self.st.desktops.loading = false;
+            self.st.desktops.moving = None;
+            // The page was closed: follow the desktop in front when it opens
+            // again, not whichever card the pointer last rested on.
+            self.st.desktops.pick = None;
+            self.st.desktops.flash = None;
+            self.st.desktops.flash_bad = false;
+            self.st.ui.desktop_app_scroll = 0.0;
+            // Snapshots are the page's memory (about a quarter MB each): free
+            // them while it is closed. The list is small and the next refresh
+            // replaces it.
+            self.st.desktops.thumbs.clear();
+            self.st.ui.desktop_drag = None;
+        }
+    }
+
+    /// Work the Desktops page asked for. The worker is only there while the
+    /// page is open, so anything else is dropped.
+    fn desktop_cmd(&mut self, c: DesktopCmd) {
+        if self.desktops.is_none() && self.desktops_on && self.selftest.is_none() {
+            self.desktops = Some(services::desktops::Desktops::start(self.sink.clone()));
+            self.st.desktops.loading = true;
+        }
+        if let Some(d) = &self.desktops {
+            d.send(c);
+        }
+    }
+
+    fn on_desktops(&mut self, ev: DesktopEvent) {
+        // A worker can finish a snapshot just as the page closes: don't put
+        // its thumbnails back after `set_desktops(false)` freed them.
+        if !self.desktops_on {
+            return;
+        }
+        match ev {
+            DesktopEvent::Snapshot { desktops, current } => {
+                let old = self.st.desktops.current;
+                let follow = self.st.desktops.pick.is_none() || self.st.desktops.pick == Some(old);
+                self.st.desktops.list = desktops;
+                let n = self.st.desktops.list.len();
+                let current = current.min(n.saturating_sub(1));
+                self.st.desktops.current = current;
+                self.st.desktops.pick = Some(if follow { current } else { self.st.desktops.pick.unwrap_or(current).min(n.saturating_sub(1)) });
+                self.st.desktops.loading = false;
+                self.st.desktops.error = None;
+                // Forget snapshots of windows that are gone (closed or moved).
+                let live: HashSet<isize> = self.st.desktops.list.iter().flat_map(|d| d.windows.iter().map(|w| w.hwnd)).collect();
+                self.st.desktops.thumbs.retain(|h, _| live.contains(h));
+            }
+            DesktopEvent::Thumb { hwnd, image } => {
+                self.st.desktops.thumbs.insert(hwnd, image);
+            }
+            DesktopEvent::Current(i) => {
+                let old = self.st.desktops.current;
+                let n = self.st.desktops.list.len();
+                let i = i.min(n.saturating_sub(1));
+                self.st.desktops.current = i;
+                if self.st.desktops.pick.is_none() || self.st.desktops.pick == Some(old) {
+                    self.st.desktops.pick = Some(i);
+                }
+                self.st.desktops.loading = false;
+            }
+            DesktopEvent::Moved { hwnd, desktop, ok, why } => {
+                self.st.desktops.moving = None;
+                self.st.desktops.flash_bad = !ok;
+                let what = self.st.desktops.list.iter().flat_map(|d| d.windows.iter()).find(|w| w.hwnd == hwnd).map(|w| {
+                    if w.title.is_empty() { w.app_name.clone() } else { w.title.clone() }
+                });
+                let name = self.st.desktops.list.iter().find(|d| d.id == desktop).map(|d| d.name.clone()).unwrap_or_else(|| "the desktop".into());
+                self.st.desktops.flash = Some(if ok {
+                    (format!("Moved {} to {name}", what.unwrap_or_else(|| "the app".into())), self.st.now + 3.0)
+                } else {
+                    (why, self.st.now + 4.0)
+                });
+            }
+            DesktopEvent::Failed(e) => {
+                self.st.desktops.loading = false;
+                if self.st.desktops.list.is_empty() {
+                    self.st.desktops.error = Some(e);
+                } else {
+                    self.st.desktops.flash_bad = true;
+                    self.st.desktops.flash = Some((e, self.st.now + 4.0));
+                }
+            }
+        }
+    }
+
     /// Nobody at the PC (locked, or the display off) and battery saver.
     fn rest_now(&self) -> poni_core::sysmon::Rest {
         poni_core::sysmon::Rest { away: self.locked || self.display_off, saver: self.st.power.saver }
@@ -2173,6 +2301,15 @@ impl App {
         self.sysmon_rest = rest;
         if let Some(s) = &self.sysmon {
             s.rest(rest);
+        }
+        // The Desktops page's registry poll rests too, and catches up when
+        // someone comes back.
+        if let Some(d) = &self.desktops {
+            let away = rest.away || rest.saver;
+            d.send(DesktopCmd::Rest(away));
+            if !away {
+                d.send(DesktopCmd::Refresh);
+            }
         }
         if !poni_core::sysmon::reads(self.sysmon_on, self.st.game.active, self.st.settings.system_history, rest) {
             self.st.system.clear();
@@ -2793,6 +2930,7 @@ impl App {
         let dt = dt.clamp(0.0, 0.05) as f32;
         self.set_stats(self.mode == Mode::Expanded(PageKind::Today));
         self.set_sysmon(self.mode == Mode::Expanded(PageKind::System));
+        self.set_desktops(self.mode == Mode::Expanded(PageKind::Desktops));
         self.set_oyenza_watch(self.mode == Mode::Expanded(PageKind::Oyenza));
         // The Pill theme floats the island below the top edge.
         self.island.set_floating(pill::on(self.st.settings.theme).then_some(pill::TOP_GAP));
@@ -2944,12 +3082,12 @@ impl App {
                     }
                 }
 
-                // Incoming content settles down from the bezel as it fades in,
-                // as one layer, so its text doesn't re-hint every frame.
+                // Incoming content just fades in, as one layer, so its text
+                // doesn't re-hint every frame. It is laid out at its final size
+                // and only fades, so the open is the island making room rather
+                // than a zoom of the page.
                 let out = if content_alpha < 1.0 {
-                    let grow = scale_about(pivot, CONTENT_SCALE_FROM + (1.0 - CONTENT_SCALE_FROM) * content_alpha);
-                    let drop_by = if floating { pill::motion::CONTENT_DROP } else { CONTENT_DROP };
-                    let xf = grow * Matrix3x2::translation(0.0, -drop_by * (1.0 - content_alpha));
+                    let xf = scale_about(pivot, CONTENT_SCALE_FROM + (1.0 - CONTENT_SCALE_FROM) * content_alpha);
                     let (input, st) = (&mut self.input, &mut self.st);
                     canvas.layered(union_rect(lay, body), content_alpha, xf, |c| draw_content(c, input, &mut hits, st, mode, lay, body, transition, now))
                 } else {
@@ -3504,6 +3642,7 @@ impl App {
             }
             self.set_stats(p == PageKind::Today && self.expanded);
             self.set_sysmon(p == PageKind::System && self.expanded);
+            self.set_desktops(p == PageKind::Desktops && self.expanded);
             if self.text_focus {
                 self.blur_text();
             }
@@ -3612,6 +3751,7 @@ impl App {
                 Command::Phone(c) => self.phone_cmd(c),
                 Command::Pair(c) => self.pair_cmd(c),
                 Command::Oyenza(c) => self.oyenza(c),
+                Command::Desktop(c) => self.desktop_cmd(c),
             }
         }
         self.sync_phone_offer();

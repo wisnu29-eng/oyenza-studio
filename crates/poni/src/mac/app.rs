@@ -2242,6 +2242,8 @@ impl App {
                 // shows no Pair a phone yet).
                 Command::Pair(_) => {}
                 Command::Oyenza(c) => self.oyenza(c),
+                // Windows' virtual desktops: the page has no tab on the Mac.
+                Command::Desktop(_) => {}
             }
         }
         self.sync_phone_offer();

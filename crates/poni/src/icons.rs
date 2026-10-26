@@ -74,6 +74,8 @@ pub enum Icon {
     Addons,
     /// The Script tab: lines of text with a cue arrow at the line to say.
     Script,
+    /// The Desktops tab: two overlapping desktop panes.
+    Desktops,
     /// A crescent moon: Prayer times.
     Moon,
     /// Stop (the adzan): a rounded square.
@@ -264,6 +266,10 @@ pub fn parts(icon: Icon) -> &'static [Part] {
         // A circle (r 8) less a second one (r 7) up and to the right: both arcs meet where the circles cross.
         Moon => p![s("M19.77 13.9A8 8 0 1 1 10.1 4.23A7 7 0 0 0 19.77 13.9Z")],
         Script => p![s("M10 6.5h10"), s("M10 12h10"), s("M10 17.5h6.5"), f("M3.6 9.3v5.4a.8.8 0 0 0 1.2.7l4.3-2.7a.8.8 0 0 0 0-1.4L4.8 8.6a.8.8 0 0 0-1.2.7z")],
+        Desktops => p![
+            s("M9 5.5h9A1.5 1.5 0 0 1 19.5 7v7A1.5 1.5 0 0 1 18 15.5H9A1.5 1.5 0 0 1 7.5 14V7A1.5 1.5 0 0 1 9 5.5z"),
+            s("M4.5 8.5h10A1.5 1.5 0 0 1 16 10v8.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 3 18.5V10a1.5 1.5 0 0 1 1.5-1.5z"),
+        ],
         Stop => p![f("M8.2 6.5h7.6a1.7 1.7 0 0 1 1.7 1.7v7.6a1.7 1.7 0 0 1-1.7 1.7H8.2a1.7 1.7 0 0 1-1.7-1.7V8.2a1.7 1.7 0 0 1 1.7-1.7z")],
         Record => p![f("M6.5 12a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0z")],
         Download => p![s("M12 4v10.5"), s("M7.5 10L12 14.5 16.5 10"), s("M4.5 16v2.5A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5V16")],
@@ -282,7 +288,7 @@ mod tests {
         Icon::Pin, Icon::PinFill, Icon::Folder, Icon::File, Icon::Trash, Icon::Undo, Icon::Reset,
         Icon::Sliders, Icon::Open, Icon::Phone, Icon::Eye, Icon::MoneyIn, Icon::MoneyOut, Icon::Transfer, Icon::Card, Icon::Wallet,
         Icon::Unlink, Icon::Gear,
-        Icon::Gauge, Icon::App, Icon::Windows, Icon::Addons, Icon::Moon, Icon::Stop, Icon::Script, Icon::Record, Icon::Download,
+        Icon::Gauge, Icon::App, Icon::Windows, Icon::Addons, Icon::Moon, Icon::Stop, Icon::Script, Icon::Desktops, Icon::Record, Icon::Download,
     ];
 
     #[test]
